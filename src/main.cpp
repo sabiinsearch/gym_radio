@@ -1,107 +1,109 @@
-#include <Arduino.h>
-
-#ifdef ESP32
-    #include <WiFi.h>
-#else
-    #include <ESP8266WiFi.h>
-#endif
-#include "AudioFileSourceICYStream.h"
-#include "AudioFileSourceBuffer.h"
-#include "AudioGeneratorMP3.h"
-#include "AudioOutputI2S.h"
-
-// To run,update the SSID info, and upload. Attach line-level speaker input to A0/DAC2
-
-// Enter your WiFi setup here:
-const char *SSID = "...";
-const char *PASSWORD = "...";
-
-// Not so randomly picked URL
-// Live stream jazz
-const char *URL="http://jazz.streamr.ru/jazz-64.mp3";
-
-// With a little more basssssss
-//const char *URL="http://trace.dnbradio.com:8000/dnbradio_main.mp3";
-
-// Old skool DnB from the Internet Archive
-//const char *URL="https://ia801202.us.archive.org/17/items/Sniper_-_Drum_and_Bass/Sniper%20-%20Drum%20%26%20Bass%20-%20Side%20B.mp3";
-
-AudioGeneratorMP3 *mp3;
-AudioFileSourceICYStream *file;
-AudioFileSourceBuffer *buff;
-AudioOutputI2S *out;
-
-// Called when a metadata event occurs (i.e. an ID3 tag, an ICY block, etc.
-void MDCallback(void *cbData, const char *type, bool isUnicode, const char *string)
-{
-  const char *ptr = reinterpret_cast<const char *>(cbData);
-  (void) isUnicode; // Punt this ball for now
-  // Note that the type and string may be in PROGMEM, so copy them to RAM for printf
-  char s1[32], s2[64];
-  strncpy_P(s1, type, sizeof(s1));
-  s1[sizeof(s1)-1]=0;
-  strncpy_P(s2, string, sizeof(s2));
-  s2[sizeof(s2)-1]=0;
-  Serial.printf("METADATA(%s) '%s' = '%s'\n", ptr, s1, s2);
-  Serial.flush();
-}
-
-// Called when there's a warning or error (like a buffer underflow or decode hiccup)
-void StatusCallback(void *cbData, int code, const char *string)
-{
-  const char *ptr = reinterpret_cast<const char *>(cbData);
-  // Note that the string may be in PROGMEM, so copy it to RAM for printf
-  char s1[64];
-  strncpy_P(s1, string, sizeof(s1));
-  s1[sizeof(s1)-1]=0;
-  Serial.printf("STATUS(%s) '%d' = '%s'\n", ptr, code, s1);
-  Serial.flush();
-}
-
-
-void setup()
-{
+/*
+  Simple Internet Radio Demo
+  esp32-i2s-simple-radio.ino
+  Simple ESP32 I2S radio
+  Uses MAX98357 I2S Amplifier Module
+  Uses ESP32-audioI2S Library - https://github.com/schreibfaul1/ESP32-audioI2S
+ 
+  DroneBot Workshop 2022
+  https://dronebotworkshop.com
+*/
+ 
+// Include required libraries
+#include "Arduino.h"
+#include "WiFi.h"
+#include "Audio.h"
+ 
+// Define I2S connections
+#define I2S_DOUT  22
+#define I2S_BCLK  26
+#define I2S_LRC   25
+ 
+// Create audio object
+Audio audio;
+ 
+// Wifi Credentials
+String ssid =    "YOURSSID";
+String password = "YOURPASSWORD";
+ 
+void setup() {
+ 
+  // Start Serial Monitor
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("Connecting to WiFi");
-
+ 
+  // Setup WiFi in Station mode
   WiFi.disconnect();
-  WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
-  
-  WiFi.begin(SSID, PASSWORD);
-
-  // Try forever
+  WiFi.begin(ssid.c_str(), password.c_str());
+ 
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.println("...Connecting to WiFi");
-    delay(1000);
+    delay(500);
+    Serial.print(".");
   }
-  Serial.println("Connected");
-
-  file = new AudioFileSourceICYStream(URL);
-  file->RegisterMetadataCB(MDCallback, (void*)"ICY");
-  buff = new AudioFileSourceBuffer(file, 8096);
-  buff->RegisterStatusCB(StatusCallback, (void*)"buffer");
-  out = new AudioOutputI2S(0, AudioOutputI2S::INTERNAL_DAC);
-  mp3 = new AudioGeneratorMP3();
-  mp3->RegisterStatusCB(StatusCallback, (void*)"mp3");
-  mp3->begin(buff, out);
+ 
+  // WiFi Connected, print IP to serial monitor
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println("");
+ 
+  // Connect MAX98357 I2S Amplifier Module
+  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+ 
+  // Set thevolume (0-100)
+  audio.setVolume(10);
+ 
+  // Connect to an Internet radio station (select one as desired)
+  //audio.connecttohost("http://vis.media-ice.musicradio.com/CapitalMP3");
+  //audio.connecttohost("mediaserv30.live-nect MAX98357 I2S Amplifier Module
+  //audio.connecttohost("www.surfmusic.de/m3u/100-5-das-hitradio,4529.m3u");
+  //audio.connecttohost("stream.1a-webradio.de/deutsch/mp3-128/vtuner-1a");
+  //audio.connecttohost("www.antenne.de/webradio/antenne.m3u");
+  audio.connecttohost("0n-80s.radionetz.de:8000/0n-70s.mp3");
+ 
 }
-
-
+ 
 void loop()
+ 
 {
-  static int lastms = 0;
-
-  if (mp3->isRunning()) {
-    if (millis()-lastms > 1000) {
-      lastms = millis();
-      Serial.printf("Running for %d ms...\n", lastms);
-      Serial.flush();
-     }
-    if (!mp3->loop()) mp3->stop();
-  } else {
-    Serial.printf("MP3 done\n");
-    delay(1000);
-  }
+  // Run audio player
+  audio.loop();
+ 
+}
+ 
+// Audio status functions
+ 
+void audio_info(const char *info) {
+  Serial.print("info        "); Serial.println(info);
+}
+void audio_id3data(const char *info) { //id3 metadata
+  Serial.print("id3data     "); Serial.println(info);
+}
+void audio_eof_mp3(const char *info) { //end of file
+  Serial.print("eof_mp3     "); Serial.println(info);
+}
+void audio_showstation(const char *info) {
+  Serial.print("station     "); Serial.println(info);
+}
+void audio_showstreaminfo(const char *info) {
+  Serial.print("streaminfo  "); Serial.println(info);
+}
+void audio_showstreamtitle(const char *info) {
+  Serial.print("streamtitle "); Serial.println(info);
+}
+void audio_bitrate(const char *info) {
+  Serial.print("bitrate     "); Serial.println(info);
+}
+void audio_commercial(const char *info) { //duration in sec
+  Serial.print("commercial  "); Serial.println(info);
+}
+void audio_icyurl(const char *info) { //homepage
+  Serial.print("icyurl      "); Serial.println(info);
+}
+void audio_lasthost(const char *info) { //stream URL played
+  Serial.print("lasthost    "); Serial.println(info);
+}
+void audio_eof_speech(const char *info) {
+  Serial.print("eof_speech  "); Serial.println(info);
 }
